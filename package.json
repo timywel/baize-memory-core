@@ -1,0 +1,44 @@
+{
+  "name": "@timywel/baize-memory-core",
+  "version": "0.1.0",
+  "description": "白泽 4 层认知记忆核心库：BM25 + frozen snapshot + heartbeat + dreaming",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "keywords": [
+    "memory",
+    "agent",
+    "baize",
+    "cognitive-architecture",
+    "bm25",
+    "frozen-snapshot",
+    "heartbeat",
+    "dreaming"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit",
+    "coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0",
+    "@vitest/coverage-v8": "^2.1.0",
+    "tsx": "^4.19.0",
+    "@types/node": "^22.0.0"
+  }
+}

@@ -1,9 +1,30 @@
+# Build / cache
 node_modules/
 dist/
 coverage/
-*.log
-.DS_Store
-.tmp/
-tmp/
 *.tsbuildinfo
-.vitest-cache/
+.DS_Store
+
+# User data (CLAUDE.md §"输出路径严格分流": 数据所有权归用户)
+profiles/
+*.local.json
+.env
+.env.local
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Temp / test artifacts
+temp/
+.tmp/
+*.tmp

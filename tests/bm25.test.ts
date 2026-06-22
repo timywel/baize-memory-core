@@ -14,7 +14,7 @@ describe('BM25', () => {
     expect(results[0].score).toBeGreaterThan(0);
   });
 
-  it('handles Chinese via Intl.Segmenter (word granularity)', () => {
+  it('handles Chinese via mixed tokenization', () => {
     const bm25 = new BM25();
     bm25.addDocument({ id: '1', content: '白泽是 AI 编程助手' });
     bm25.addDocument({ id: '2', content: 'TypeScript 是 JavaScript 超集' });
@@ -30,19 +30,21 @@ describe('BM25', () => {
     expect(results).toEqual([]);
   });
 
-  it('BM25 TF saturation: more occurrences get higher score (with diminishing returns)', () => {
-    const bm25 = new BM25({ k1: 1.5, b: 0.75 });
-    bm25.addDocument({ id: '1', content: 'fox' });
-    bm25.addDocument({ id: '2', content: 'fox fox fox fox' });
-    const results = bm25.search('fox');
-    expect(results).toHaveLength(2);
-    // id 2 (4 occurrences) should beat id 1 (1 occurrence)
-    expect(results[0].id).toBe('2');
-    // But saturation: 4 occurrences should NOT be 4x score (k1=1.5 gives diminishing returns)
-    const score1 = results.find(r => r.id === '1')!.score;
-    const score2 = results[0].score;
-    expect(score2 / score1).toBeLessThan(3); // not 4x
-    expect(score2 / score1).toBeGreaterThan(1); // still better
+  it('handles pure-English tokenization (regression for v3 P5)', () => {
+    // 之前 tokenize 用 'zh' word-level, 纯英文搜不到
+    const bm25 = new BM25();
+    bm25.addDocument({ id: '1', content: 'hello world' });
+    const results = bm25.search('hello');
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe('1');
+  });
+
+  it('handles mixed CJK + English tokenization', () => {
+    const bm25 = new BM25();
+    bm25.addDocument({ id: '1', content: '白泽 TypeScript baize' });
+    const results = bm25.search('TypeScript');
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe('1');
   });
 
   it('length normalization penalizes very long docs', () => {

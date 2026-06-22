@@ -87,7 +87,13 @@ export class LayerStorage {
           });
         }
       }
-      return entries;
+      return entries.filter((e) => {
+        // v0.4.6 (2026-06-13): 过滤 polluted=true 的污染条目
+        // 关联: plan/已完成/PLAN-MEMORY-SUMMARY-PURGE-20260613-013000.md
+        // 清洗脚本标 polluted=true 但不删, 检索时 SDK 自动跳过
+        if (e?.metadata?.polluted === true) return false;
+        return true;
+      });
     } catch {
       return [];
     }

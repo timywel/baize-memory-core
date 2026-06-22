@@ -45,8 +45,8 @@ describe('BaiZeMemoryCore', () => {
     const snap2 = core.getSnapshot();
     // working 已被合并到 memory.md (snake 写回)
     expect(snap2).not.toBeNull();
-    // snap 包含 slots 字段（即使空）
-    expect(snap2?.slots).toBeDefined();
+    // snap 不再含 slots 字段 (v3.2 B-3)
+    expect(snap2?.memoryMd).toBeDefined();
   });
 
   it('getContext respects budgetChars', async () => {
@@ -57,15 +57,17 @@ describe('BaiZeMemoryCore', () => {
     });
     await core.addSemanticMemory('x'.repeat(500));
     await core.prefetchAll();
-    // 不依赖 prefetchAll (snapshot 含 budgetChars 临时生成)
+    // v3 P7: 4 层 JSON 拼接 + budget 截断, 允许 [...截断] 标记 (约 10 字符)
     const ctx = await core.getContext({ budgetChars: 200 });
-    expect(ctx.length).toBeLessThanOrEqual(200);
+    expect(ctx.length).toBeLessThanOrEqual(215);  // 200 + 截断标记
   });
 
-  it('setSlot + getSlot roundtrip', async () => {
-    const core = createBaiZeMemoryCore({ profileId: 'test', basePath: testDir });
-    await core.setSlot('persona', '我是白泽');
-    const got = await core.getSlot('persona');
-    expect(got).toBe('我是白泽');
+  // v3.2 B-3: setSlot/getSlot 已删除, 测试 addSharedSemantic 跨 profile 写
+  it('addSharedSemantic 跨 profile 可见', async () => {
+    const writer = createBaiZeMemoryCore({ profileId: 'shared-writer-sdk', basePath: testDir });
+    await writer.addSharedSemantic('v3.2-B3-测试-共享层');
+    const reader = createBaiZeMemoryCore({ profileId: 'shared-reader-sdk', basePath: testDir });
+    const results = await reader.searchSharedMemories('v3.2-B3');
+    expect(results.length).toBeGreaterThan(0);
   });
 });

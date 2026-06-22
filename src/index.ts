@@ -31,4 +31,8 @@ export { withMutex } from './util/mutex.js';
 export { logger } from './util/logger.js';
 export type { Level } from './util/logger.js';
 
+// Slot 适配 (BaizeSlot 契约)
+export { createSlot, MemoryCoreSlot } from './slot.js';
+export type { BaizeSlot, SlotContext, SlotManifest, SlotRequest, SlotResponse, SlotHealthStatus } from './slot.js';
+
 export const VERSION = '0.1.0';

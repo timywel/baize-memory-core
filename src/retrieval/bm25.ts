@@ -9,8 +9,17 @@ const log = logger('bm25');
 const SEGMENTER = new Intl.Segmenter('zh', { granularity: 'word' });
 
 function tokenize(text: string): string[] {
-  return Array.from(SEGMENTER.segment(text.toLowerCase()), seg => seg.segment)
-    .filter(t => t.trim().length > 0);
+  const lower = text.toLowerCase();
+  // 混合分词: 按空白 + 标点切 (支持中英), 同时用 Intl.Segmenter 处理 CJK
+  const basicTokens = lower.split(/[\s\p{P}]+/u).filter(t => t.length > 0);
+  // 对 CJK 部分再用 Intl.Segmenter 细粒度分词
+  const cjkTokens: string[] = [];
+  for (const seg of SEGMENTER.segment(lower)) {
+    if (/[一-鿿]/.test(seg.segment)) {
+      cjkTokens.push(seg.segment);
+    }
+  }
+  return [...new Set([...basicTokens, ...cjkTokens])];
 }
 
 export interface BM25Doc {

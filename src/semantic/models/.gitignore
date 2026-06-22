@@ -1,0 +1,6 @@
+# FastText 模型文件（体积大，不纳入 git 版本控制）
+# 通过 scripts/download-model.sh 下载
+*.bin
+
+# 保留目录结构
+!.gitkeep

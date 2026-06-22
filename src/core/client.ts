@@ -16,7 +16,8 @@ import { logger } from '../util/logger.js';
 
 const log = logger('memory-core');
 
-export type SlotName = 'persona' | 'user_preferences' | 'tool_guidelines' | 'project_context' | 'pending_items' | 'session_patterns' | 'self_notes';
+// v3.2 B-3: SlotName 类型已删除
+export type SlotName = never;
 
 export interface CoreConfig {
   profileId: string;
@@ -53,9 +54,8 @@ export interface BaiZeMemoryCore {
   /* 借鉴 hermes memory 工具 */
   memoryTool(): MemoryTool;
 
-  /* Slots (API 兼容) */
-  getSlot(name: SlotName | string): Promise<string | null>;
-  setSlot(name: SlotName | string, content: string): Promise<void>;
+  /* Slots (v3.2 B-3 收口: 业务改走 addSemanticMemory) */
+  // getSlot/setSlot 已删除, 减少 ATTACKER_PWNED 类攻击面
 
   /* 共享层 (API 兼容) */
   addSharedSemantic(fact: string, metadata?: Record<string, unknown>): Promise<string>;
@@ -73,6 +73,7 @@ export interface BaiZeMemoryCore {
   /* 生命周期 */
   onSessionStart(): Promise<void>;
   onSessionEnd(): Promise<void>;
+  _destroy(): void;  // v3 P9: SIGTERM cleanup
 }
 
 const SHARED_BASE = '~/.baize/memory/shared';  // 跨 profile 共享（与 baize 现有兼容）
@@ -148,16 +149,9 @@ export function createBaiZeMemoryCore(config: CoreConfig): BaiZeMemoryCore {
   // compaction
   const compactionService = new CompactionService();
 
-  /* Slots (支持 scope 路由：user_preferences/self_notes → 全局) */
-  const GLOBAL_SLOTS = new Set(['user_preferences', 'self_notes']);
-  const globalSlotsDir = path.join(process.env.HOME || '/root', '.baize', 'memory', 'slots');
-
-  function slotDir(name: string): string {
-    if (GLOBAL_SLOTS.has(name)) {
-      return globalSlotsDir;
-    }
-    return path.join(basePath, 'slots');
-  }
+  // v3.2 B-3: slot 通道已删除, ATTACKER_PWNED 根除
+  //   原 getSlot/setSlot/slotDir/isValidSlotName 全部移除
+  //   业务改走 addSemanticMemory 写偏好事实
 
   async function prefetchAll(): Promise<void> {
     // 1. 读所有 4 层 + shared → 加载 BM25
@@ -169,24 +163,13 @@ export function createBaiZeMemoryCore(config: CoreConfig): BaiZeMemoryCore {
     ];
     await loadBm25(allEntries);
 
-    // 2. 读 memory.md + shared.md + slots
+    // 2. 读 memory.md + shared.md (v3.2 B-3: slots 已删除)
     const memoryMd = await tool.read();
     const sharedMd = await sharedTool.read();
-    const slots: Record<string, string> = {};
-    const slotsDir = path.join(basePath, 'slots');
-    try {
-      const files = await fs.readdir(slotsDir);
-      for (const f of files) {
-        if (f.endsWith('.md')) {
-          const name = f.replace(/\.md$/, '');
-          slots[name] = await fs.readFile(path.join(slotsDir, f), 'utf-8');
-        }
-      }
-    } catch { /* 目录不存在 */ }
 
     // 3. 冻结 snapshot (如果启用)
     if (frozenSnapshotEnabled) {
-      snapshot.capture({ memoryMd, sharedMd, slots });
+      snapshot.capture({ memoryMd, sharedMd });
     }
   }
 
@@ -249,27 +232,77 @@ export function createBaiZeMemoryCore(config: CoreConfig): BaiZeMemoryCore {
 
     async getContext(options = {}) {
       const { includeShared = true, budgetChars = memorySoftLimit } = options;
+      // v3 P7 fix: 4 层 JSON 拼入 context, 不只 memory.md
+      // 之前: 只读 memory.md (snapshot.injectIntoPrompt 或 tool.read) → 用户写入的 semantic/xxx.json 不被读到
+      // 修复: 同时输出 memory.md + 4 层 JSON 最近内容 + shared
+      const sections: string[] = [];
+
+      // 1. memory.md (snapshot 或临时)
       const prompt = snapshot.injectIntoPrompt();
-      // 如果有 snapshot 直接用；否则 injectIntoPrompt 返回空
       if (prompt) {
-        return prompt.slice(0, budgetChars);
+        sections.push(prompt);
+      } else {
+        const memoryMd = await tool.read();
+        if (memoryMd) sections.push(memoryMd);
+        // v3.2 B-3: slots 读取已删除
       }
-      // 无 snapshot → 临时生成
-      const memoryMd = await tool.read();
-      const sharedMd = includeShared ? await sharedTool.read() : '';
-      const tmp = new SnapshotManager({ maxChars: memoryHardLimit });
-      const slots: Record<string, string> = {};
+
+      // 2. 4 层 JSON (semantic/working/episodic/procedural)
+      // v3 P8 fix: 按 importance 降序 (高重要度先), 同重要度按时间倒序 (recent 先)
+      // 解决"早期写入被截断"问题
       try {
-        const slotsDir = path.join(basePath, 'slots');
-        const files = await fs.readdir(slotsDir);
-        for (const f of files) {
-          if (f.endsWith('.md')) {
-            slots[f.replace(/\.md$/, '')] = await fs.readFile(path.join(slotsDir, f), 'utf-8');
-          }
+        // 合并所有 4 层 entry, 加 layer 标签
+        type EntryWithLayer = { id: string; content: string; layer: string; importance: number; createdAt: string };
+        const allRaw: EntryWithLayer[] = [];
+        const getImportance = (e: { metadata?: Record<string, unknown> }): number => {
+          const v = (e.metadata?.['importance'] as number | undefined) ?? 0.5;
+          return typeof v === 'number' ? v : 0.5;
+        };
+        for (const e of await semantic.readAll()) allRaw.push({ id: e.id, content: e.content, layer: 'semantic', importance: getImportance(e), createdAt: e.createdAt });
+        for (const e of await working.readAll()) allRaw.push({ id: e.id, content: e.content, layer: 'working', importance: getImportance(e), createdAt: e.createdAt });
+        for (const e of await episodic.readAll()) allRaw.push({ id: e.id, content: e.content, layer: 'episodic', importance: getImportance(e), createdAt: e.createdAt });
+        for (const e of await procedural.readAll()) allRaw.push({ id: e.id, content: e.content, layer: 'procedural', importance: getImportance(e), createdAt: e.createdAt });
+
+        // 排序: importance 降序, 同重要度 createdAt 降序 (recent 先)
+        allRaw.sort((a, b) => {
+          const imp = (b.importance ?? 0.5) - (a.importance ?? 0.5);
+          if (imp !== 0) return imp;
+          return b.createdAt.localeCompare(a.createdAt);
+        });
+
+        // v3.2 B-3: 移除硬 maxLen 截断, 让整体 join 后由末尾 budget 截断处理
+        const allEntries: string[] = [];
+        for (const e of allRaw.slice(0, 35)) {
+          const layerShort = e.layer;
+          allEntries.push(`- [${layerShort} imp=${(e.importance ?? 0.5).toFixed(2)}] ${e.content}`);
         }
-      } catch { /* 目录不存在 */ }
-      tmp.capture({ memoryMd, sharedMd, slots });
-      return tmp.injectIntoPrompt().slice(0, budgetChars);
+        if (allEntries.length > 0) {
+          sections.push(`## 4 层记忆 (按 importance+时间排序)\n${allEntries.join('\n')}`);
+        }
+      } catch { /* 降级 */ }
+
+      // 3. shared (如果未在 #1 拼入)
+      if (includeShared && !prompt) {
+        try {
+          const sharedSemanticEntries = await sharedSemantic.readAll();
+          const sharedProcEntries = await sharedProcedural.readAll();
+          const sharedLines: string[] = [];
+          for (const e of sharedSemanticEntries.slice(-5)) {
+            sharedLines.push(`- [shared-semantic] ${e.content.slice(0, 100)}`);
+          }
+          for (const e of sharedProcEntries.slice(-5)) {
+            sharedLines.push(`- [shared-procedural] ${e.content.slice(0, 100)}`);
+          }
+          if (sharedLines.length > 0) {
+            sections.push(`## 共享层\n${sharedLines.join('\n')}`);
+          }
+        } catch { /* 降级 */ }
+      }
+
+      // 拼装并按 budgetChars 截断
+      const result = sections.join('\n\n');
+      if (result.length <= budgetChars) return result;
+      return result.slice(0, budgetChars) + '\n[...截断]';
     },
 
     prefetchAll,
@@ -278,20 +311,7 @@ export function createBaiZeMemoryCore(config: CoreConfig): BaiZeMemoryCore {
 
     memoryTool: () => tool,
 
-    /* Slots (支持 scope 路由) */
-    async getSlot(name) {
-      try {
-        return await fs.readFile(path.join(slotDir(name), `${name}.md`), 'utf-8');
-      } catch {
-        return null;
-      }
-    },
-
-    async setSlot(name, content) {
-      const dir = slotDir(name);
-      await fs.mkdir(dir, { recursive: true });
-      await fs.writeFile(path.join(dir, `${name}.md`), content, 'utf-8');
-    },
+    // v3.2 B-3: getSlot/setSlot 已删除 (ATTACKER_PWNED 根除)
 
     /* 共享层 */
     addSharedSemantic: (fact, metadata) => sharedSemantic.write(fact, metadata),
@@ -336,6 +356,11 @@ export function createBaiZeMemoryCore(config: CoreConfig): BaiZeMemoryCore {
 
     compact: () => compactionService,
     external: () => external,
+
+    // v3 P9 fix: SIGTERM 自清理, 防止短脚本场景下定时器阻止 Node 退出
+    _destroy: () => {
+      heartbeatService.stop();
+    },
 
     async onSessionStart() {
       await prefetchAll();

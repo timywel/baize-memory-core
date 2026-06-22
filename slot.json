@@ -1,0 +1,21 @@
+{
+  "id": "baize-memory-core",
+  "version": "0.3.0",
+  "type": "process",
+  "entry": {
+    "process": "./src/index.ts"
+  },
+  "capabilities": [
+    "memory.episode.commit",
+    "memory.episode.recall",
+    "memory.semantic.search",
+    "memory.procedural.load"
+  ],
+  "subscribes": [
+    "chat.message.done",
+    "chat.agent.status"
+  ],
+  "healthDegradedMs": 30000,
+  "healthUnhealthyMs": 60000,
+  "allowBreakingVersion": false
+}

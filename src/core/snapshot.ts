@@ -6,7 +6,7 @@ import { countChars, softTruncate, isOverLimit } from '../util/chars.js';
 export interface SnapshotData {
   memoryMd: string;
   sharedMd: string;
-  slots: Record<string, string>;
+  // v3.2 B-3: slots 字段已删除
 }
 
 export interface FrozenSnapshot extends SnapshotData {
@@ -41,7 +41,6 @@ export class SnapshotManager {
     this.snapshot = {
       memoryMd,
       sharedMd: data.sharedMd,
-      slots: { ...data.slots },
       capturedAt: new Date().toISOString(),
       truncated,
       totalChars,
@@ -62,9 +61,7 @@ export class SnapshotManager {
     if (this.snapshot.sharedMd) {
       parts.push(`## 跨 profile 共享\n${this.snapshot.sharedMd}`);
     }
-    for (const [name, content] of Object.entries(this.snapshot.slots)) {
-      parts.push(`## ${name}\n${content}`);
-    }
+    // v3.2 B-3: slots 渲染已删除
     return parts.join('\n\n');
   }
 
